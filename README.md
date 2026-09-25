@@ -2,7 +2,7 @@
 
 Expense Tracker is a full-stack web application that helps users manage their income and expenses in one place.
 
-Users can create an account, log in securely, add their income and expenses, edit or delete transactions, and see their overall financial summary through a simple dashboard.
+Users can create an account, log in securely, add income and expenses, edit or delete transactions, and view their financial summary through a simple dashboard.
 
 ## Features
 
@@ -11,58 +11,60 @@ Users can create an account, log in securely, add their income and expenses, edi
 - JWT-based authentication
 - Add income and expense transactions
 - Edit and delete transactions
-- View complete transaction history
+- View transaction history
 - Filter transactions by category
 - Monthly expense tracking
 - Income, expense and balance summary
 - Savings calculation
 - Responsive dashboard
-- Data stored securely in MongoDB
+- Data stored in MongoDB
 
 ## Technologies Used
 
 ### Frontend
+
 - React.js
 - HTML
 - CSS
 - JavaScript
 
 ### Backend
+
 - Node.js
 - Express.js
 - REST API
 
 ### Database
+
 - MongoDB
 - Mongoose
 
 ### Authentication
+
 - JSON Web Token (JWT)
 - bcrypt.js
 
 ## How the Project Works
 
-The frontend is built using React.js. It communicates with the backend through REST APIs.
+The frontend is built using React.js and communicates with the backend through REST APIs.
 
-The backend is developed using Node.js and Express.js. It handles user authentication, transaction operations and communication with the database.
+The backend is developed using Node.js and Express.js. It handles authentication, transaction operations and communication with the database.
 
 MongoDB is used to store user and transaction data.
 
-The basic flow is:
+### Basic Flow
 
 React.js → Express.js / Node.js → MongoDB
 
-## Main Features
-
-### Authentication
+## Authentication
 
 Users can create an account and log in using their email and password.
 
-Passwords are encrypted using bcrypt before being stored in the database.
+Passwords are protected using bcrypt before being stored in the database.
 
-JWT is used to maintain authenticated sessions.
+JWT is used to authenticate users after login.
 
-### Transaction Management
+## Transaction Management
 
 Users can:
 
@@ -75,9 +77,9 @@ Users can:
 
 Each transaction contains information such as title, amount, type, category and date.
 
-### Dashboard
+## Dashboard
 
-The dashboard provides a quick overview of the user's financial activity, including:
+The dashboard provides a quick overview of financial activity, including:
 
 - Total income
 - Total expenses
@@ -93,15 +95,25 @@ The dashboard provides a quick overview of the user's financial activity, includ
 POST /api/auth/register
 POST /api/auth/login
 
+### Transactions
+
+```text
+POST /api/transactions/add
+GET /api/transactions/:userId
+GET /api/transactions/summary/:userId
+PUT /api/transactions/:id
+DELETE /api/transactions/:id
+
 Running the Project Locally
-1. Clone the repository
+1. Clone the Repository
 git clone https://github.com/harshguptakth/expense-tracker.git
+cd expense-tracker
 2. Start the Backend
 cd backend
 npm install
 npm start
 
-The backend runs on:
+Backend:
 
 http://localhost:5000
 3. Start the Frontend
@@ -112,12 +124,12 @@ cd frontend
 npm install
 npm start
 
-The frontend runs on:
+Frontend:
 
 http://localhost:3000
 Environment Variables
 
-Create a .env file inside the backend folder.
+Create a .env file inside the backend folder:
 
 PORT=5000
 MONGO_URI=your_mongodb_connection_string
@@ -141,18 +153,15 @@ Expense-Tracker
 │
 └── .gitignore
 Future Improvements
-
-Some features I plan to add in the future are:
-
 Expense charts and reports
-Better monthly budget planning
+Advanced monthly budget planning
 Export transactions to PDF or Excel
 Email notifications
 Advanced financial analytics
-Deployment with a cloud database
+Cloud deployment
 What I Learned
 
-While building this project, I learned how a frontend and backend communicate using REST APIs, how to work with MongoDB, how authentication works using JWT, and how to build CRUD operations in a real-world application.
+While building this project, I learned how frontend and backend applications communicate using REST APIs, how to work with MongoDB, how JWT authentication works, and how CRUD operations are implemented in a real-world application.
 
 Author
 
