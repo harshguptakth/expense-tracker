@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const API = "https://expense-tracker-atq4.onrender.com";
+const API = "https://expense-tracker-atq4.onrender.com/api";
 
 const categories = [
     "Food",
@@ -85,17 +85,56 @@ function AuthScreen({ onLogin }) {
                 );
             }
 
-            localStorage.setItem(
-                "expense_token",
-                data.token
-            );
+            // Registration endpoint creates the account but does not return a JWT.
+            // Log in immediately after a successful registration.
+            if (mode === "register") {
+                const loginResponse = await fetch(
+                    `${API}/auth/login`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            email,
+                            password
+                        })
+                    }
+                );
 
-            localStorage.setItem(
-                "expense_user",
-                JSON.stringify(data.user)
-            );
+                const loginData = await loginResponse.json();
 
-            onLogin(data.user);
+                if (!loginResponse.ok) {
+                    throw new Error(
+                        loginData.message ||
+                        "Account created. Please log in."
+                    );
+                }
+
+                localStorage.setItem(
+                    "expense_token",
+                    loginData.token
+                );
+
+                localStorage.setItem(
+                    "expense_user",
+                    JSON.stringify(loginData.user)
+                );
+
+                onLogin(loginData.user);
+            } else {
+                localStorage.setItem(
+                    "expense_token",
+                    data.token
+                );
+
+                localStorage.setItem(
+                    "expense_user",
+                    JSON.stringify(data.user)
+                );
+
+                onLogin(data.user);
+            }
 
         } catch (error) {
             setError(error.message);
@@ -327,13 +366,6 @@ function App() {
 
 
     // =================================================
-    // AUTH TOKEN
-    // =================================================
-
-    
-
-
-    // =================================================
     // TOAST
     // =================================================
 
@@ -347,24 +379,52 @@ function App() {
 
 
     // =================================================
+    // LOGOUT
+    // =================================================
+
+    const logout = useCallback(() => {
+        localStorage.removeItem("expense_token");
+        localStorage.removeItem("expense_user");
+
+        setUser(null);
+        setTransactions([]);
+        setActivePage("dashboard");
+    }, []);
+
+
+    // =================================================
     // FETCH TRANSACTIONS
     // =================================================
 
-    const fetchTransactions = async () => {
-
+    const fetchTransactions = useCallback(async () => {
         const currentToken =
             localStorage.getItem("expense_token");
 
-        if (!currentToken) return;
+        const savedUser =
+            localStorage.getItem("expense_user");
+
+        if (!currentToken || !savedUser) return;
+
+        let currentUser;
 
         try {
+            currentUser = JSON.parse(savedUser);
+        } catch (error) {
+            logout();
+            return;
+        }
 
+        if (!currentUser?.id) {
+            logout();
+            return;
+        }
+
+        try {
             const response = await fetch(
-                `${API}/transactions`,
+                `${API}/transactions/${currentUser.id}`,
                 {
                     headers: {
-                        Authorization:
-                            `Bearer ${currentToken}`
+                        Authorization: `Bearer ${currentToken}`
                     }
                 }
             );
@@ -376,176 +436,28 @@ function App() {
 
             const data = await response.json();
 
-            setTransactions(
-                data.transactions || []
-            );
+            if (!response.ok) {
+                throw new Error(
+                    data.message ||
+                    "Unable to fetch transactions"
+                );
+            }
 
+            setTransactions(data.transactions || []);
         } catch (error) {
-
             console.error(
                 "Transaction fetch error:",
                 error
             );
-
         }
-    };
+    }, [logout]);
 
 
     useEffect(() => {
-
-        if (user) {
+        if (user?.id) {
             fetchTransactions();
         }
-
-    }, [user]);
-
-
-    // =================================================
-    // LOGOUT
-    // =================================================
-
-    const logout = () => {
-
-        localStorage.removeItem(
-            "expense_token"
-        );
-
-        localStorage.removeItem(
-            "expense_user"
-        );
-
-        setUser(null);
-        setTransactions([]);
-
-        setActivePage("dashboard");
-    };
-
-
-    // =================================================
-    // ADD / UPDATE TRANSACTION
-    // =================================================
-
-    const saveTransaction = async (formData) => {
-
-        const currentToken =
-            localStorage.getItem("expense_token");
-
-        try {
-
-            const isEditing =
-                Boolean(editingTransaction);
-
-            const url = isEditing
-                ? `${API}/transactions/${editingTransaction._id}`
-                : `${API}/transactions/add`;
-
-            const response = await fetch(
-                url,
-                {
-                    method: isEditing
-                        ? "PUT"
-                        : "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-
-                        Authorization:
-                            `Bearer ${currentToken}`
-                    },
-
-                    body: JSON.stringify({
-                        title: formData.title,
-                        amount: Number(
-                            formData.amount
-                        ),
-                        type: formData.type,
-                        category:
-                            formData.category,
-                        date: formData.date
-                    })
-                }
-            );
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(
-                    data.message ||
-                    "Unable to save transaction"
-                );
-            }
-
-            await fetchTransactions();
-
-            setShowModal(false);
-            setEditingTransaction(null);
-
-            showToast(
-                isEditing
-                    ? "Transaction updated successfully"
-                    : "Transaction added successfully"
-            );
-
-        } catch (error) {
-
-            showToast(error.message);
-
-        }
-    };
-
-
-    // =================================================
-    // DELETE
-    // =================================================
-
-    const deleteTransaction = async (id) => {
-
-        const currentToken =
-            localStorage.getItem("expense_token");
-
-        if (
-            !window.confirm(
-                "Are you sure you want to delete this transaction?"
-            )
-        ) {
-            return;
-        }
-
-        try {
-
-            const response = await fetch(
-                `${API}/transactions/${id}`,
-                {
-                    method: "DELETE",
-                    headers: {
-                        Authorization:
-                            `Bearer ${currentToken}`
-                    }
-                }
-            );
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(
-                    data.message ||
-                    "Unable to delete transaction"
-                );
-            }
-
-            await fetchTransactions();
-
-            showToast(
-                "Transaction deleted successfully"
-            );
-
-        } catch (error) {
-
-            showToast(error.message);
-
-        }
-    };
+    }, [user?.id, fetchTransactions]);
 
 
     // =================================================
@@ -553,45 +465,42 @@ function App() {
     // =================================================
 
     const totalIncome = useMemo(() => {
-
         return transactions
             .filter(
-                (item) =>
-                    item.type === "income"
+                (transaction) =>
+                    transaction.type === "income"
             )
             .reduce(
-                (sum, item) =>
-                    sum + Number(item.amount),
+                (sum, transaction) =>
+                    sum + Number(transaction.amount),
                 0
             );
-
     }, [transactions]);
 
 
     const totalExpense = useMemo(() => {
-
         return transactions
             .filter(
-                (item) =>
-                    item.type === "expense"
+                (transaction) =>
+                    transaction.type === "expense"
             )
             .reduce(
-                (sum, item) =>
-                    sum + Number(item.amount),
+                (sum, transaction) =>
+                    sum + Number(transaction.amount),
                 0
             );
-
     }, [transactions]);
 
 
-    const balance =
-        totalIncome - totalExpense;
+    const balance = totalIncome - totalExpense;
 
 
     const savingsRate =
         totalIncome > 0
             ? Math.round(
-                (balance / totalIncome) * 100
+                ((totalIncome - totalExpense) /
+                    totalIncome) *
+                100
             )
             : 0;
 
@@ -606,154 +515,363 @@ function App() {
 
 
     // =================================================
-    // FILTER
+    // FILTERED TRANSACTIONS
     // =================================================
 
-    const filteredTransactions =
-        transactions.filter((transaction) => {
+    const filteredTransactions = useMemo(() => {
+        return transactions.filter((transaction) => {
 
-            const searchMatch =
+            const matchesSearch =
                 transaction.title
-                    .toLowerCase()
-                    .includes(
-                        search.toLowerCase()
-                    );
+                    ?.toLowerCase()
+                    .includes(search.toLowerCase()) ||
+                transaction.category
+                    ?.toLowerCase()
+                    .includes(search.toLowerCase());
 
-            const categoryMatch =
+            const matchesCategory =
                 filterCategory === "All" ||
-                transaction.category ===
-                filterCategory;
+                transaction.category === filterCategory;
 
             return (
-                searchMatch &&
-                categoryMatch
+                matchesSearch &&
+                matchesCategory
             );
         });
+    }, [
+        transactions,
+        search,
+        filterCategory
+    ]);
 
 
     // =================================================
     // CATEGORY ANALYTICS
     // =================================================
 
-    const categoryTotals = categories
-        .map((category) => {
+    const categoryData = useMemo(() => {
 
-            const total =
-                transactions
-                    .filter(
-                        (item) =>
-                            item.type === "expense" &&
-                            item.category === category
-                    )
-                    .reduce(
-                        (sum, item) =>
-                            sum + Number(item.amount),
-                        0
-                    );
+        const data = {};
 
-            return {
-                category,
-                total
-            };
+        transactions
+            .filter(
+                (transaction) =>
+                    transaction.type === "expense"
+            )
+            .forEach((transaction) => {
 
-        })
-        .filter((item) => item.total > 0)
-        .sort(
-            (a, b) =>
-                b.total - a.total
-        );
+                const category =
+                    transaction.category || "Other";
+
+                data[category] =
+                    (data[category] || 0) +
+                    Number(transaction.amount);
+            });
+
+        return Object.entries(data)
+            .sort((a, b) => b[1] - a[1]);
+
+    }, [transactions]);
 
 
     // =================================================
-    // MONTHLY CHART
+    // MONTHLY DATA
     // =================================================
 
-    const monthlyData = Array.from(
-        { length: 6 },
-        (_, index) => {
+    const monthlyData = useMemo(() => {
 
-            const date = new Date();
+        const months = {};
 
-            date.setMonth(
-                date.getMonth() - (5 - index)
-            );
+        transactions.forEach((transaction) => {
 
-            const month =
+            const date =
+                new Date(transaction.date);
+
+            const key =
                 date.toLocaleString(
-                    "en-US",
+                    "default",
                     {
                         month: "short"
                     }
                 );
 
-            const monthNumber =
-                date.getMonth();
+            if (!months[key]) {
+                months[key] = {
+                    income: 0,
+                    expense: 0
+                };
+            }
 
-            const year =
-                date.getFullYear();
+            if (transaction.type === "income") {
+                months[key].income +=
+                    Number(transaction.amount);
+            } else {
+                months[key].expense +=
+                    Number(transaction.amount);
+            }
+        });
 
-            const income =
-                transactions
-                    .filter((item) => {
+        return Object.entries(months);
 
-                        const d =
-                            new Date(item.date);
-
-                        return (
-                            item.type === "income" &&
-                            d.getMonth() ===
-                            monthNumber &&
-                            d.getFullYear() ===
-                            year
-                        );
-
-                    })
-                    .reduce(
-                        (sum, item) =>
-                            sum + Number(item.amount),
-                        0
-                    );
-
-            const expense =
-                transactions
-                    .filter((item) => {
-
-                        const d =
-                            new Date(item.date);
-
-                        return (
-                            item.type === "expense" &&
-                            d.getMonth() ===
-                            monthNumber &&
-                            d.getFullYear() ===
-                            year
-                        );
-
-                    })
-                    .reduce(
-                        (sum, item) =>
-                            sum + Number(item.amount),
-                        0
-                    );
-
-            return {
-                month,
-                income,
-                expense
-            };
-        }
-    );
+    }, [transactions]);
 
 
     // =================================================
-    // NOT LOGGED IN
+    // ADD TRANSACTION
+    // =================================================
+
+    const addTransaction = async (transactionData) => {
+
+        const token =
+            localStorage.getItem(
+                "expense_token"
+            );
+
+        if (!user?.id) return;
+
+        try {
+
+            const response = await fetch(
+                `${API}/transactions/add`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+                        Authorization:
+                            `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        ...transactionData,
+                        userId: user.id
+                    })
+                }
+            );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.message ||
+                    "Unable to add transaction"
+                );
+            }
+
+            setTransactions((prev) => [
+                data.transaction,
+                ...prev
+            ]);
+
+            setShowModal(false);
+
+            showToast(
+                "Transaction added successfully"
+            );
+
+        } catch (error) {
+
+            console.error(error);
+
+            showToast(
+                error.message ||
+                "Something went wrong"
+            );
+        }
+    };
+
+
+    // =================================================
+    // UPDATE TRANSACTION
+    // =================================================
+
+    const updateTransaction =
+        async (id, transactionData) => {
+
+            const token =
+                localStorage.getItem(
+                    "expense_token"
+                );
+
+            try {
+
+                const response = await fetch(
+                    `${API}/transactions/${id}`,
+                    {
+                        method: "PUT",
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                            Authorization:
+                                `Bearer ${token}`
+                        },
+                        body:
+                            JSON.stringify(
+                                transactionData
+                            )
+                    }
+                );
+
+                const data =
+                    await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.message ||
+                        "Unable to update transaction"
+                    );
+                }
+
+                setTransactions((prev) =>
+                    prev.map((transaction) =>
+                        transaction._id === id
+                            ? data.transaction
+                            : transaction
+                    )
+                );
+
+                setShowModal(false);
+                setEditingTransaction(null);
+
+                showToast(
+                    "Transaction updated successfully"
+                );
+
+            } catch (error) {
+
+                console.error(error);
+
+                showToast(
+                    error.message ||
+                    "Something went wrong"
+                );
+            }
+        };
+
+
+    // =================================================
+    // DELETE TRANSACTION
+    // =================================================
+
+    const deleteTransaction =
+        async (id) => {
+
+            const token =
+                localStorage.getItem(
+                    "expense_token"
+                );
+
+            const confirmed =
+                window.confirm(
+                    "Are you sure you want to delete this transaction?"
+                );
+
+            if (!confirmed) return;
+
+            try {
+
+                const response = await fetch(
+                    `${API}/transactions/${id}`,
+                    {
+                        method: "DELETE",
+                        headers: {
+                            Authorization:
+                                `Bearer ${token}`
+                        }
+                    }
+                );
+
+                const data =
+                    await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.message ||
+                        "Unable to delete transaction"
+                    );
+                }
+
+                setTransactions((prev) =>
+                    prev.filter(
+                        (transaction) =>
+                            transaction._id !== id
+                    )
+                );
+
+                showToast(
+                    "Transaction deleted successfully"
+                );
+
+            } catch (error) {
+
+                console.error(error);
+
+                showToast(
+                    error.message ||
+                    "Something went wrong"
+                );
+            }
+        };
+
+
+    // =================================================
+    // BUDGET
+    // =================================================
+
+    const updateBudget = (value) => {
+
+        const newBudget =
+            Number(value) || 0;
+
+        setBudget(newBudget);
+
+        localStorage.setItem(
+            "expense_budget",
+            newBudget
+        );
+
+        showToast(
+            "Monthly budget updated"
+        );
+    };
+
+
+    // =================================================
+    // OPEN EDIT MODAL
+    // =================================================
+
+    const openEditModal =
+        (transaction) => {
+
+            setEditingTransaction(
+                transaction
+            );
+
+            setShowModal(true);
+        };
+
+
+    // =================================================
+    // OPEN ADD MODAL
+    // =================================================
+
+    const openAddModal = () => {
+
+        setEditingTransaction(null);
+
+        setShowModal(true);
+    };
+
+
+    // =================================================
+    // IF USER IS NOT LOGGED IN
     // =================================================
 
     if (!user) {
         return (
             <AuthScreen
-                onLogin={(loggedUser) =>
-                    setUser(loggedUser)
+                onLogin={(loggedInUser) =>
+                    setUser(loggedInUser)
                 }
             />
         );
@@ -761,14 +879,38 @@ function App() {
 
 
     // =================================================
-    // MAIN UI
+    // SIDEBAR
     // =================================================
+
+    const navItems = [
+        {
+            id: "dashboard",
+            label: "Dashboard",
+            icon: "⌂"
+        },
+        {
+            id: "transactions",
+            label: "Transactions",
+            icon: "↔"
+        },
+        {
+            id: "reports",
+            label: "Reports",
+            icon: "◔"
+        },
+        {
+            id: "settings",
+            label: "Settings",
+            icon: "⚙"
+        }
+    ];
+
 
     return (
         <div
             className={
                 darkMode
-                    ? "app dark"
+                    ? "app dark-mode"
                     : "app"
             }
         >
@@ -777,7 +919,7 @@ function App() {
 
             <aside className="sidebar">
 
-                <div className="brand">
+                <div className="sidebar-brand">
 
                     <div className="brand-icon">
                         ₹
@@ -791,135 +933,92 @@ function App() {
                 </div>
 
 
-                <div className="menu-label">
-                    MAIN MENU
-                </div>
+                <nav className="sidebar-nav">
 
+                    <div className="nav-section-title">
+                        MAIN MENU
+                    </div>
 
-                <nav>
+                    {navItems.map((item) => (
 
-                    <button
-                        className={
-                            activePage === "dashboard"
-                                ? "nav-item active"
-                                : "nav-item"
-                        }
-                        onClick={() =>
-                            setActivePage(
-                                "dashboard"
-                            )
-                        }
-                    >
-                        <span>▦</span>
-                        Dashboard
-                    </button>
+                        <button
+                            key={item.id}
+                            className={
+                                activePage === item.id
+                                    ? "nav-item active"
+                                    : "nav-item"
+                            }
+                            onClick={() =>
+                                setActivePage(item.id)
+                            }
+                        >
 
+                            <span className="nav-icon">
+                                {item.icon}
+                            </span>
 
-                    <button
-                        className={
-                            activePage === "transactions"
-                                ? "nav-item active"
-                                : "nav-item"
-                        }
-                        onClick={() =>
-                            setActivePage(
-                                "transactions"
-                            )
-                        }
-                    >
-                        <span>▤</span>
-                        Transactions
-                    </button>
+                            <span>
+                                {item.label}
+                            </span>
 
+                        </button>
 
-                    <button
-                        className={
-                            activePage === "reports"
-                                ? "nav-item active"
-                                : "nav-item"
-                        }
-                        onClick={() =>
-                            setActivePage(
-                                "reports"
-                            )
-                        }
-                    >
-                        <span>◩</span>
-                        Reports
-                    </button>
-
-
-                    <button
-                        className={
-                            activePage === "settings"
-                                ? "nav-item active"
-                                : "nav-item"
-                        }
-                        onClick={() =>
-                            setActivePage(
-                                "settings"
-                            )
-                        }
-                    >
-                        <span>⚙</span>
-                        Settings
-                    </button>
+                    ))}
 
                 </nav>
 
 
-                {/* BUDGET */}
+                <div className="sidebar-bottom">
 
-                <div className="sidebar-budget">
+                    <button
+                        className="theme-toggle"
+                        onClick={() =>
+                            setDarkMode(
+                                (prev) => !prev
+                            )
+                        }
+                    >
+                        <span>
+                            {darkMode
+                                ? "☀"
+                                : "☾"}
+                        </span>
 
-                    <div className="budget-title">
-                        Monthly Budget
-                        <span>🎯</span>
-                    </div>
-
-                    <strong>
-                        ₹{totalExpense.toLocaleString()}
-                    </strong>
-
-                    <div className="progress">
-                        <div
-                            style={{
-                                width:
-                                    `${budgetUsed}%`
-                            }}
-                        />
-                    </div>
-
-                    <small>
-                        ₹
-                        {Math.max(
-                            budget - totalExpense,
-                            0
-                        ).toLocaleString()}
-                        {" "}remaining
-                    </small>
-
-                </div>
+                        {darkMode
+                            ? "Light Mode"
+                            : "Dark Mode"}
+                    </button>
 
 
-                {/* USER */}
+                    <button
+                        className="logout-button"
+                        onClick={logout}
+                    >
+                        <span>↪</span>
+                        Logout
+                    </button>
 
-                <div className="sidebar-user">
 
-                    <div className="avatar">
-                        {user.name
-                            ?.charAt(0)
-                            .toUpperCase()}
-                    </div>
+                    <div className="sidebar-user">
 
-                    <div>
-                        <strong>
-                            {user.name}
-                        </strong>
+                        <div className="user-avatar">
+                            {user.name
+                                ?.charAt(0)
+                                ?.toUpperCase()}
+                        </div>
 
-                        <small>
-                            Student
-                        </small>
+                        <div className="user-info">
+
+                            <strong>
+                                {user.name}
+                            </strong>
+
+                            <span>
+                                {user.email}
+                            </span>
+
+                        </div>
+
                     </div>
 
                 </div>
@@ -927,292 +1026,265 @@ function App() {
             </aside>
 
 
-            {/* MAIN */}
+            {/* MAIN CONTENT */}
 
-            <main className="main">
-
-                {/* TOPBAR */}
+            <main className="main-content">
 
                 <header className="topbar">
 
-                    <div className="mobile-title">
-                        Expense Tracker
+                    <div>
+
+                        <h1>
+                            {activePage === "dashboard"
+                                ? "Dashboard"
+                                : activePage ===
+                                    "transactions"
+                                    ? "Transactions"
+                                    : activePage ===
+                                        "reports"
+                                        ? "Reports"
+                                        : "Settings"}
+                        </h1>
+
+                        <p>
+                            Welcome back,{" "}
+                            {user.name?.split(" ")[0]} 👋
+                        </p>
+
                     </div>
 
-                    <div className="top-actions">
 
-                        <button
-                            className="icon-button"
-                            onClick={() =>
-                                setDarkMode(
-                                    !darkMode
-                                )
-                            }
-                        >
-                            {darkMode
-                                ? "☀️"
-                                : "🌙"}
-                        </button>
+                    <div className="topbar-actions">
 
-                        <button className="icon-button">
-                            🔔
-                        </button>
+                        <div className="search-box">
 
-                        <div className="top-user">
+                            <span>⌕</span>
 
-                            <div className="avatar small">
-                                {user.name
-                                    ?.charAt(0)
-                                    .toUpperCase()}
-                            </div>
-
-                            <div>
-                                <strong>
-                                    {user.name}
-                                </strong>
-
-                                <small>
-                                    Student
-                                </small>
-                            </div>
+                            <input
+                                type="text"
+                                placeholder="Search transactions..."
+                                value={search}
+                                onChange={(e) =>
+                                    setSearch(
+                                        e.target.value
+                                    )
+                                }
+                            />
 
                         </div>
+
+                        <button
+                            className="top-add-button"
+                            onClick={openAddModal}
+                        >
+                            + Add Transaction
+                        </button>
 
                     </div>
 
                 </header>
 
 
-                {/* CONTENT */}
+                {/* DASHBOARD */}
 
-                <section className="content">
+                {activePage === "dashboard" && (
 
+                    <div className="dashboard-page">
 
-                    {/* ===================================
-                        DASHBOARD
-                    =================================== */}
+                        <div className="stats-grid">
 
-                    {activePage === "dashboard" && (
-                        <>
+                            <div className="stat-card income-card">
 
-                            <div className="page-heading">
+                                <div className="stat-card-top">
 
-                                <div>
                                     <span>
-                                        OVERVIEW
+                                        Total Income
                                     </span>
 
-                                    <h1>
-                                        Financial Dashboard
-                                    </h1>
-
-                                    <p>
-                                        Track your money,
-                                        control your spending
-                                        and reach your goals.
-                                    </p>
-                                </div>
-
-                                <button
-                                    className="primary-button"
-                                    onClick={() => {
-                                        setEditingTransaction(
-                                            null
-                                        );
-                                        setShowModal(true);
-                                    }}
-                                >
-                                    + Add Transaction
-                                </button>
-
-                            </div>
-
-
-                            {/* STATS */}
-
-                            <div className="stats-grid">
-
-                                <StatCard
-                                    icon="₹"
-                                    title="TOTAL BALANCE"
-                                    value={
-                                        balance
-                                    }
-                                    note={
-                                        `${savingsRate}% savings rate`
-                                    }
-                                    type="balance"
-                                />
-
-                                <StatCard
-                                    icon="↗"
-                                    title="TOTAL INCOME"
-                                    value={
-                                        totalIncome
-                                    }
-                                    note="Money received"
-                                    type="income"
-                                />
-
-                                <StatCard
-                                    icon="↘"
-                                    title="TOTAL EXPENSE"
-                                    value={
-                                        totalExpense
-                                    }
-                                    note="Money spent"
-                                    type="expense"
-                                />
-
-                                <StatCard
-                                    icon="%"
-                                    title="SAVINGS RATE"
-                                    value={`${savingsRate}%`}
-                                    note="Of total income"
-                                    type="saving"
-                                    raw
-                                />
-
-                            </div>
-
-
-                            {/* CHART + BUDGET */}
-
-                            <div className="two-column">
-
-                                <div className="panel chart-panel">
-
-                                    <div className="panel-header">
-
-                                        <div>
-                                            <h3>
-                                                Income vs Expense
-                                            </h3>
-
-                                            <p>
-                                                Overall financial comparison
-                                            </p>
-                                        </div>
-
-                                        <span className="year-badge">
-                                            2026
-                                        </span>
-
+                                    <div className="stat-icon income">
+                                        ↗
                                     </div>
 
+                                </div>
 
-                                    <div className="bar-chart">
+                                <h2>
+                                    ₹
+                                    {totalIncome.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
 
-                                        {monthlyData.map(
-                                            (item, index) => {
+                                <small>
+                                    All-time income
+                                </small>
 
-                                                const max =
-                                                    Math.max(
-                                                        item.income,
-                                                        item.expense,
-                                                        1
-                                                    );
+                            </div>
 
-                                                return (
-                                                    <div
-                                                        className="chart-column"
-                                                        key={index}
-                                                    >
 
-                                                        <div className="bars">
+                            <div className="stat-card expense-card">
 
-                                                            <div
-                                                                className="bar income"
-                                                                style={{
-                                                                    height:
-                                                                        `${Math.max(
-                                                                            (item.income /
-                                                                                max) *
-                                                                            100,
-                                                                            5
-                                                                        )}%`
-                                                                }}
-                                                            />
+                                <div className="stat-card-top">
 
-                                                            <div
-                                                                className="bar expense"
-                                                                style={{
-                                                                    height:
-                                                                        `${Math.max(
-                                                                            (item.expense /
-                                                                                max) *
-                                                                            100,
-                                                                            5
-                                                                        )}%`
-                                                                }}
-                                                            />
+                                    <span>
+                                        Total Expenses
+                                    </span>
 
-                                                        </div>
+                                    <div className="stat-icon expense">
+                                        ↘
+                                    </div>
 
-                                                        <span>
-                                                            {item.month}
-                                                        </span>
+                                </div>
 
-                                                    </div>
+                                <h2>
+                                    ₹
+                                    {totalExpense.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
+
+                                <small>
+                                    All-time spending
+                                </small>
+
+                            </div>
+
+
+                            <div className="stat-card balance-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Current Balance
+                                    </span>
+
+                                    <div className="stat-icon balance">
+                                        ₹
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    ₹
+                                    {balance.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
+
+                                <small>
+                                    Available balance
+                                </small>
+
+                            </div>
+
+
+                            <div className="stat-card savings-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Savings Rate
+                                    </span>
+
+                                    <div className="stat-icon savings">
+                                        %
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    {savingsRate}%
+                                </h2>
+
+                                <small>
+                                    Income saved
+                                </small>
+
+                            </div>
+
+                        </div>
+                                                {/* BUDGET CARD */}
+
+                        <div className="dashboard-grid">
+
+                            <div className="budget-card">
+
+                                <div className="section-header">
+
+                                    <div>
+                                        <h3>Monthly Budget</h3>
+                                        <p>
+                                            Keep your spending
+                                            under control
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        className="small-action"
+                                        onClick={() => {
+                                            const value =
+                                                window.prompt(
+                                                    "Enter monthly budget:",
+                                                    budget
+                                                );
+
+                                            if (
+                                                value !== null &&
+                                                value !== ""
+                                            ) {
+                                                updateBudget(
+                                                    value
                                                 );
                                             }
-                                        )}
+                                        }}
+                                    >
+                                        Edit
+                                    </button>
+
+                                </div>
+
+
+                                <div className="budget-amount">
+
+                                    <div>
+
+                                        <span>
+                                            Spent
+                                        </span>
+
+                                        <strong>
+                                            ₹
+                                            {totalExpense.toLocaleString(
+                                                "en-IN"
+                                            )}
+                                        </strong>
 
                                     </div>
 
-                                    <div className="legend">
+
+                                    <div className="budget-limit">
 
                                         <span>
-                                            <i className="dot income-dot" />
-                                            Income
+                                            Budget
                                         </span>
 
-                                        <span>
-                                            <i className="dot expense-dot" />
-                                            Expense
-                                        </span>
+                                        <strong>
+                                            ₹
+                                            {budget.toLocaleString(
+                                                "en-IN"
+                                            )}
+                                        </strong>
 
                                     </div>
 
                                 </div>
 
 
-                                <div className="panel">
+                                <div className="progress-container">
 
-                                    <div className="panel-header">
-
-                                        <div>
-                                            <h3>
-                                                Monthly Budget
-                                            </h3>
-
-                                            <p>
-                                                Your spending limit
-                                            </p>
-                                        </div>
-
-                                        <span className="target">
-                                            🎯
-                                        </span>
-
-                                    </div>
-
-                                    <div className="budget-number">
-
-                                        ₹
-                                        {totalExpense.toLocaleString()}
-
-                                        <small>
-                                            /
-                                            ₹
-                                            {budget.toLocaleString()}
-                                        </small>
-
-                                    </div>
-
-                                    <div className="large-progress">
+                                    <div className="progress-track">
 
                                         <div
+                                            className="progress-fill"
                                             style={{
                                                 width:
                                                     `${budgetUsed}%`
@@ -1221,529 +1293,1564 @@ function App() {
 
                                     </div>
 
-                                    <div className="budget-info">
-
-                                        <span>
-                                            {Math.round(
-                                                budgetUsed
-                                            )}% used
-                                        </span>
-
-                                        <strong>
-                                            ₹
-                                            {Math.max(
-                                                budget -
-                                                totalExpense,
-                                                0
-                                            ).toLocaleString()}
-                                            {" "}left
-                                        </strong>
-
-                                    </div>
+                                    <span>
+                                        {Math.round(
+                                            budgetUsed
+                                        )}%
+                                    </span>
 
                                 </div>
+
+
+                                <p className="budget-message">
+
+                                    {totalExpense > budget
+                                        ? "⚠ You have exceeded your monthly budget."
+                                        : `₹${Math.max(
+                                            budget -
+                                            totalExpense,
+                                            0
+                                        ).toLocaleString(
+                                            "en-IN"
+                                        )} remaining this month`}
+
+                                </p>
 
                             </div>
 
 
-                            {/* RECENT */}
+                            {/* QUICK ACTION */}
 
-                            <div className="panel recent-panel">
+                            <div className="quick-action-card">
 
-                                <div className="panel-header">
+                                <div className="section-header">
 
                                     <div>
-                                        <h3>
-                                            Recent Transactions
-                                        </h3>
-
+                                        <h3>Quick Actions</h3>
                                         <p>
-                                            Your latest financial activity
+                                            Manage your finances
                                         </p>
                                     </div>
 
+                                </div>
+
+
+                                <div className="quick-actions">
+
                                     <button
-                                        className="text-button"
+                                        onClick={openAddModal}
+                                        className="quick-action"
+                                    >
+
+                                        <div className="quick-icon add">
+                                            +
+                                        </div>
+
+                                        <div>
+                                            <strong>
+                                                Add Transaction
+                                            </strong>
+
+                                            <span>
+                                                Record income
+                                                or expense
+                                            </span>
+                                        </div>
+
+                                    </button>
+
+
+                                    <button
                                         onClick={() =>
                                             setActivePage(
                                                 "transactions"
                                             )
                                         }
+                                        className="quick-action"
                                     >
-                                        View all →
+
+                                        <div className="quick-icon view">
+                                            ↔
+                                        </div>
+
+                                        <div>
+                                            <strong>
+                                                View Transactions
+                                            </strong>
+
+                                            <span>
+                                                See your
+                                                transaction history
+                                            </span>
+                                        </div>
+
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+
+                        {/* ANALYTICS */}
+
+                        <div className="analytics-grid">
+
+                            {/* CATEGORY ANALYTICS */}
+
+                            <div className="analytics-card">
+
+                                <div className="section-header">
+
+                                    <div>
+                                        <h3>
+                                            Expense by Category
+                                        </h3>
+
+                                        <p>
+                                            Where your money
+                                            is going
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        className="view-all"
+                                        onClick={() =>
+                                            setActivePage(
+                                                "reports"
+                                            )
+                                        }
+                                    >
+                                        View Report →
                                     </button>
 
                                 </div>
 
 
-                                <TransactionList
-                                    transactions={
-                                        transactions.slice(
-                                            0,
-                                            5
-                                        )
-                                    }
-                                    onEdit={(item) => {
-                                        setEditingTransaction(
-                                            item
-                                        );
-                                        setShowModal(true);
-                                    }}
-                                    onDelete={
-                                        deleteTransaction
-                                    }
-                                />
+                                {categoryData.length === 0 ? (
 
-                            </div>
+                                    <div className="empty-chart">
 
-                        </>
-                    )}
-
-
-                    {/* ===================================
-                        TRANSACTIONS
-                    =================================== */}
-
-                    {activePage === "transactions" && (
-                        <>
-
-                            <div className="page-heading">
-
-                                <div>
-                                    <span>
-                                        MONEY ACTIVITY
-                                    </span>
-
-                                    <h1>
-                                        Transactions
-                                    </h1>
-
-                                    <p>
-                                        Manage all your income
-                                        and expenses.
-                                    </p>
-                                </div>
-
-                                <button
-                                    className="primary-button"
-                                    onClick={() => {
-                                        setEditingTransaction(
-                                            null
-                                        );
-                                        setShowModal(true);
-                                    }}
-                                >
-                                    + Add Transaction
-                                </button>
-
-                            </div>
-
-
-                            <div className="panel">
-
-                                <div className="filters">
-
-                                    <input
-                                        className="search-input"
-                                        placeholder="Search transactions..."
-                                        value={search}
-                                        onChange={(e) =>
-                                            setSearch(
-                                                e.target.value
-                                            )
-                                        }
-                                    />
-
-                                    <select
-                                        value={
-                                            filterCategory
-                                        }
-                                        onChange={(e) =>
-                                            setFilterCategory(
-                                                e.target.value
-                                            )
-                                        }
-                                    >
-                                        <option value="All">
-                                            All Categories
-                                        </option>
-
-                                        {categories.map(
-                                            (category) => (
-                                                <option
-                                                    key={
-                                                        category
-                                                    }
-                                                    value={
-                                                        category
-                                                    }
-                                                >
-                                                    {category}
-                                                </option>
-                                            )
-                                        )}
-                                    </select>
-
-                                </div>
-
-
-                                <TransactionList
-                                    transactions={
-                                        filteredTransactions
-                                    }
-                                    onEdit={(item) => {
-                                        setEditingTransaction(
-                                            item
-                                        );
-                                        setShowModal(true);
-                                    }}
-                                    onDelete={
-                                        deleteTransaction
-                                    }
-                                />
-
-                            </div>
-
-                        </>
-                    )}
-
-
-                    {/* ===================================
-                        REPORTS
-                    =================================== */}
-
-                    {activePage === "reports" && (
-                        <>
-
-                            <div className="page-heading">
-
-                                <div>
-                                    <span>
-                                        ANALYTICS
-                                    </span>
-
-                                    <h1>
-                                        Financial Reports
-                                    </h1>
-
-                                    <p>
-                                        Understand where your
-                                        money is going.
-                                    </p>
-                                </div>
-
-                            </div>
-
-
-                            <div className="reports-grid">
-
-                                <div className="panel">
-
-                                    <div className="panel-header">
-                                        <div>
-                                            <h3>
-                                                Spending by Category
-                                            </h3>
-
-                                            <p>
-                                                Expense distribution
-                                            </p>
+                                        <div className="empty-icon">
+                                            ◔
                                         </div>
+
+                                        <p>
+                                            No expense data
+                                            available yet
+                                        </p>
+
+                                        <button
+                                            onClick={
+                                                openAddModal
+                                            }
+                                        >
+                                            Add your first
+                                            expense
+                                        </button>
+
                                     </div>
 
-                                    {categoryTotals.length === 0 ? (
-                                        <div className="empty-state">
-                                            No expense data yet.
-                                        </div>
-                                    ) : (
-                                        <div className="category-list">
+                                ) : (
 
-                                            {categoryTotals.map(
-                                                (item) => {
+                                    <div className="category-list">
+
+                                        {categoryData
+                                            .slice(0, 6)
+                                            .map(
+                                                (
+                                                    [category, amount],
+                                                    index
+                                                ) => {
 
                                                     const percentage =
                                                         totalExpense >
                                                             0
                                                             ? (
-                                                                item.total /
-                                                                totalExpense
-                                                            ) *
-                                                            100
+                                                                (amount /
+                                                                    totalExpense) *
+                                                                100
+                                                            )
                                                             : 0;
 
                                                     return (
+
                                                         <div
                                                             className="category-row"
                                                             key={
-                                                                item.category
+                                                                category
                                                             }
                                                         >
 
-                                                            <div>
+                                                            <div className="category-info">
+
+                                                                <div
+                                                                    className={`category-dot dot-${index}`}
+                                                                />
+
                                                                 <span>
                                                                     {
-                                                                        item.category
+                                                                        category
                                                                     }
                                                                 </span>
 
-                                                                <strong>
-                                                                    ₹
-                                                                    {item.total.toLocaleString()}
-                                                                </strong>
                                                             </div>
+
 
                                                             <div className="category-progress">
-                                                                <div
-                                                                    style={{
-                                                                        width:
-                                                                            `${percentage}%`
-                                                                    }}
-                                                                />
+
+                                                                <div className="category-track">
+
+                                                                    <div
+                                                                        className="category-fill"
+                                                                        style={{
+                                                                            width:
+                                                                                `${percentage}%`
+                                                                        }}
+                                                                    />
+
+                                                                </div>
+
                                                             </div>
 
-                                                            <small>
-                                                                {Math.round(
-                                                                    percentage
-                                                                )}%
-                                                            </small>
+
+                                                            <div className="category-value">
+
+                                                                <strong>
+                                                                    ₹
+                                                                    {amount.toLocaleString(
+                                                                        "en-IN"
+                                                                    )}
+                                                                </strong>
+
+                                                                <span>
+                                                                    {Math.round(
+                                                                        percentage
+                                                                    )}
+                                                                    %
+                                                                </span>
+
+                                                            </div>
 
                                                         </div>
+
                                                     );
                                                 }
                                             )}
 
-                                        </div>
-                                    )}
+                                    </div>
+
+                                )}
+
+                            </div>
+
+
+                            {/* INCOME VS EXPENSE */}
+
+                            <div className="analytics-card">
+
+                                <div className="section-header">
+
+                                    <div>
+                                        <h3>
+                                            Income vs Expenses
+                                        </h3>
+
+                                        <p>
+                                            Financial overview
+                                        </p>
+                                    </div>
+
+                                    <span className="period-label">
+                                        All time
+                                    </span>
 
                                 </div>
 
 
-                                <div className="panel report-summary">
+                                <div className="comparison-chart">
 
-                                    <h3>
-                                        Financial Summary
-                                    </h3>
+                                    <div className="comparison-item">
 
-                                    <div className="summary-line">
-                                        <span>
-                                            Income
-                                        </span>
+                                        <div className="comparison-label">
 
-                                        <strong className="positive">
-                                            +₹
-                                            {totalIncome.toLocaleString()}
-                                        </strong>
-                                    </div>
+                                            <span className="income-dot" />
 
-                                    <div className="summary-line">
-                                        <span>
-                                            Expenses
-                                        </span>
+                                            <span>
+                                                Income
+                                            </span>
 
-                                        <strong className="negative">
-                                            -₹
-                                            {totalExpense.toLocaleString()}
-                                        </strong>
-                                    </div>
-
-                                    <div className="summary-line">
-                                        <span>
-                                            Balance
-                                        </span>
+                                        </div>
 
                                         <strong>
                                             ₹
-                                            {balance.toLocaleString()}
+                                            {totalIncome.toLocaleString(
+                                                "en-IN"
+                                            )}
                                         </strong>
-                                    </div>
-
-                                    <div className="summary-line">
-                                        <span>
-                                            Transactions
-                                        </span>
-
-                                        <strong>
-                                            {
-                                                transactions.length
-                                            }
-                                        </strong>
-                                    </div>
-
-                                </div>
-
-                            </div>
-
-                        </>
-                    )}
-
-
-                    {/* ===================================
-                        SETTINGS
-                    =================================== */}
-
-                    {activePage === "settings" && (
-                        <>
-
-                            <div className="page-heading">
-
-                                <div>
-                                    <span>
-                                        ACCOUNT
-                                    </span>
-
-                                    <h1>
-                                        Settings
-                                    </h1>
-
-                                    <p>
-                                        Manage your account
-                                        preferences.
-                                    </p>
-                                </div>
-
-                            </div>
-
-
-                            <div className="settings-grid">
-
-                                <div className="panel">
-
-                                    <h3>
-                                        Profile
-                                    </h3>
-
-                                    <div className="profile-box">
-
-                                        <div className="avatar large">
-                                            {user.name
-                                                ?.charAt(0)
-                                                .toUpperCase()}
-                                        </div>
-
-                                        <div>
-                                            <strong>
-                                                {user.name}
-                                            </strong>
-
-                                            <p>
-                                                {user.email}
-                                            </p>
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div className="panel">
-
-                                    <h3>
-                                        Preferences
-                                    </h3>
-
-                                    <div className="setting-row">
-
-                                        <div>
-                                            <strong>
-                                                Dark Mode
-                                            </strong>
-
-                                            <p>
-                                                Change dashboard appearance
-                                            </p>
-                                        </div>
-
-                                        <button
-                                            className={
-                                                darkMode
-                                                    ? "toggle on"
-                                                    : "toggle"
-                                            }
-                                            onClick={() =>
-                                                setDarkMode(
-                                                    !darkMode
-                                                )
-                                            }
-                                        >
-                                            <span />
-                                        </button>
 
                                     </div>
 
 
-                                    <div className="setting-row budget-setting">
+                                    <div className="comparison-bar">
 
-                                        <div>
-                                            <strong>
-                                                Monthly Budget
-                                            </strong>
-
-                                            <p>
-                                                Set your monthly spending limit
-                                            </p>
-                                        </div>
-
-                                        <input
-                                            type="number"
-                                            value={budget}
-                                            onChange={(e) => {
-
-                                                const value =
-                                                    Number(
-                                                        e.target.value
-                                                    );
-
-                                                setBudget(
-                                                    value
-                                                );
-
-                                                localStorage.setItem(
-                                                    "expense_budget",
-                                                    value
-                                                );
+                                        <div
+                                            className="income-bar"
+                                            style={{
+                                                width:
+                                                    totalIncome +
+                                                        totalExpense >
+                                                        0
+                                                        ? `${(
+                                                            totalIncome /
+                                                            (
+                                                                totalIncome +
+                                                                totalExpense
+                                                            )
+                                                        ) *
+                                                        100
+                                                        }%`
+                                                        : "0%"
                                             }}
                                         />
 
                                     </div>
 
+
+                                    <div className="comparison-item">
+
+                                        <div className="comparison-label">
+
+                                            <span className="expense-dot" />
+
+                                            <span>
+                                                Expenses
+                                            </span>
+
+                                        </div>
+
+                                        <strong>
+                                            ₹
+                                            {totalExpense.toLocaleString(
+                                                "en-IN"
+                                            )}
+                                        </strong>
+
+                                    </div>
+
+
+                                    <div className="comparison-bar">
+
+                                        <div
+                                            className="expense-bar"
+                                            style={{
+                                                width:
+                                                    totalIncome +
+                                                        totalExpense >
+                                                        0
+                                                        ? `${(
+                                                            totalExpense /
+                                                            (
+                                                                totalIncome +
+                                                                totalExpense
+                                                            )
+                                                        ) *
+                                                        100
+                                                        }%`
+                                                        : "0%"
+                                            }}
+                                        />
+
+                                    </div>
+
+
+                                    <div className="net-result">
+
+                                        <span>
+                                            Net Balance
+                                        </span>
+
+                                        <strong
+                                            className={
+                                                balance >= 0
+                                                    ? "positive"
+                                                    : "negative"
+                                            }
+                                        >
+                                            ₹
+                                            {balance.toLocaleString(
+                                                "en-IN"
+                                            )}
+                                        </strong>
+
+                                    </div>
+
                                 </div>
 
+                            </div>
 
-                                <div className="panel logout-panel">
+                        </div>
 
+
+                        {/* RECENT TRANSACTIONS */}
+
+                        <div className="recent-section">
+
+                            <div className="section-header">
+
+                                <div>
                                     <h3>
-                                        Account
+                                        Recent Transactions
                                     </h3>
 
                                     <p>
-                                        Sign out from your
-                                        Expense Tracker account.
+                                        Your latest financial
+                                        activity
+                                    </p>
+                                </div>
+
+                                <button
+                                    className="view-all"
+                                    onClick={() =>
+                                        setActivePage(
+                                            "transactions"
+                                        )
+                                    }
+                                >
+                                    View All →
+                                </button>
+
+                            </div>
+
+
+                            {transactions.length === 0 ? (
+
+                                <div className="empty-state">
+
+                                    <div className="empty-state-icon">
+                                        ₹
+                                    </div>
+
+                                    <h3>
+                                        No transactions yet
+                                    </h3>
+
+                                    <p>
+                                        Start tracking your
+                                        finances by adding
+                                        your first transaction.
                                     </p>
 
                                     <button
-                                        className="logout-button"
+                                        className="primary-button"
                                         onClick={
-                                            logout
+                                            openAddModal
                                         }
                                     >
-                                        Logout
+                                        + Add Transaction
+                                    </button>
+
+                                </div>
+
+                            ) : (
+
+                                <div className="transaction-table">
+
+                                    <div className="table-header">
+
+                                        <span>
+                                            Transaction
+                                        </span>
+
+                                        <span>
+                                            Category
+                                        </span>
+
+                                        <span>
+                                            Date
+                                        </span>
+
+                                        <span>
+                                            Amount
+                                        </span>
+
+                                        <span>
+                                            Action
+                                        </span>
+
+                                    </div>
+
+
+                                    {transactions
+                                        .slice(0, 5)
+                                        .map(
+                                            (
+                                                transaction
+                                            ) => (
+
+                                                <div
+                                                    className="table-row"
+                                                    key={
+                                                        transaction._id
+                                                    }
+                                                >
+
+                                                    <div className="transaction-name">
+
+                                                        <div
+                                                            className={
+                                                                transaction.type ===
+                                                                    "income"
+                                                                    ? "transaction-icon income"
+                                                                    : "transaction-icon expense"
+                                                            }
+                                                        >
+                                                            {transaction.type ===
+                                                                "income"
+                                                                ? "↗"
+                                                                : "↘"}
+                                                        </div>
+
+                                                        <div>
+
+                                                            <strong>
+                                                                {
+                                                                    transaction.title
+                                                                }
+                                                            </strong>
+
+                                                            <small>
+                                                                {transaction.type ===
+                                                                    "income"
+                                                                    ? "Income"
+                                                                    : "Expense"}
+                                                            </small>
+
+                                                        </div>
+
+                                                    </div>
+
+
+                                                    <span className="category-badge">
+                                                        {
+                                                            transaction.category
+                                                        }
+                                                    </span>
+
+
+                                                    <span className="date-text">
+
+                                                        {new Date(
+                                                            transaction.date
+                                                        ).toLocaleDateString(
+                                                            "en-IN",
+                                                            {
+                                                                day: "2-digit",
+                                                                month: "short",
+                                                                year: "numeric"
+                                                            }
+                                                        )}
+
+                                                    </span>
+
+
+                                                    <strong
+                                                        className={
+                                                            transaction.type ===
+                                                                "income"
+                                                                ? "amount income-amount"
+                                                                : "amount expense-amount"
+                                                        }
+                                                    >
+                                                        {transaction.type ===
+                                                            "income"
+                                                            ? "+"
+                                                            : "-"}
+                                                        ₹
+                                                        {Number(
+                                                            transaction.amount
+                                                        ).toLocaleString(
+                                                            "en-IN"
+                                                        )}
+                                                    </strong>
+
+
+                                                    <div className="row-actions">
+
+                                                        <button
+                                                            className="icon-button"
+                                                            title="Edit"
+                                                            onClick={() =>
+                                                                openEditModal(
+                                                                    transaction
+                                                                )
+                                                            }
+                                                        >
+                                                            ✎
+                                                        </button>
+
+                                                        <button
+                                                            className="icon-button delete"
+                                                            title="Delete"
+                                                            onClick={() =>
+                                                                deleteTransaction(
+                                                                    transaction._id
+                                                                )
+                                                            }
+                                                        >
+                                                            ×
+                                                        </button>
+
+                                                    </div>
+
+                                                </div>
+
+                                            )
+                                        )}
+
+                                </div>
+
+                            )}
+
+                        </div>
+
+                    </div>
+
+                )}
+
+
+                {/* TRANSACTIONS PAGE */}
+
+                {activePage === "transactions" && (
+
+                    <div className="page-section">
+
+                        <div className="page-toolbar">
+
+                            <div>
+
+                                <h2>
+                                    All Transactions
+                                </h2>
+
+                                <p>
+                                    Manage your complete
+                                    transaction history
+                                </p>
+
+                            </div>
+
+
+                            <button
+                                className="primary-button"
+                                onClick={openAddModal}
+                            >
+                                + Add Transaction
+                            </button>
+
+                        </div>
+
+
+                        <div className="filters">
+
+                            <div className="filter-search">
+
+                                <span>⌕</span>
+
+                                <input
+                                    type="text"
+                                    placeholder="Search by title or category..."
+                                    value={search}
+                                    onChange={(e) =>
+                                        setSearch(
+                                            e.target.value
+                                        )
+                                    }
+                                />
+
+                            </div>
+
+
+                            <select
+                                value={
+                                    filterCategory
+                                }
+                                onChange={(e) =>
+                                    setFilterCategory(
+                                        e.target.value
+                                    )
+                                }
+                            >
+
+                                <option value="All">
+                                    All Categories
+                                </option>
+
+                                {categories.map(
+                                    (category) => (
+
+                                        <option
+                                            key={category}
+                                            value={category}
+                                        >
+                                            {category}
+                                        </option>
+
+                                    )
+                                )}
+
+                            </select>
+
+                        </div>
+
+
+                        <div className="transaction-table full-table">
+
+                            <div className="table-header">
+
+                                <span>
+                                    Transaction
+                                </span>
+
+                                <span>
+                                    Category
+                                </span>
+
+                                <span>
+                                    Date
+                                </span>
+
+                                <span>
+                                    Amount
+                                </span>
+
+                                <span>
+                                    Actions
+                                </span>
+
+                            </div>
+
+
+                            {filteredTransactions.length ===
+                                0 ? (
+
+                                <div className="empty-state">
+
+                                    <div className="empty-state-icon">
+                                        ₹
+                                    </div>
+
+                                    <h3>
+                                        No transactions found
+                                    </h3>
+
+                                    <p>
+                                        Try changing your
+                                        search or filter.
+                                    </p>
+
+                                </div>
+
+                            ) : (
+
+                                filteredTransactions.map(
+                                    (transaction) => (
+
+                                        <div
+                                            className="table-row"
+                                            key={
+                                                transaction._id
+                                            }
+                                        >
+
+                                            <div className="transaction-name">
+
+                                                <div
+                                                    className={
+                                                        transaction.type ===
+                                                            "income"
+                                                            ? "transaction-icon income"
+                                                            : "transaction-icon expense"
+                                                    }
+                                                >
+                                                    {transaction.type ===
+                                                        "income"
+                                                        ? "↗"
+                                                        : "↘"}
+                                                </div>
+
+                                                <div>
+
+                                                    <strong>
+                                                        {
+                                                            transaction.title
+                                                        }
+                                                    </strong>
+
+                                                    <small>
+                                                        {transaction.type}
+                                                    </small>
+
+                                                </div>
+
+                                            </div>
+
+
+                                            <span className="category-badge">
+                                                {
+                                                    transaction.category
+                                                }
+                                            </span>
+
+
+                                            <span className="date-text">
+
+                                                {new Date(
+                                                    transaction.date
+                                                ).toLocaleDateString(
+                                                    "en-IN",
+                                                    {
+                                                        day: "2-digit",
+                                                        month: "short",
+                                                        year: "numeric"
+                                                    }
+                                                )}
+
+                                            </span>
+
+
+                                            <strong
+                                                className={
+                                                    transaction.type ===
+                                                        "income"
+                                                        ? "amount income-amount"
+                                                        : "amount expense-amount"
+                                                }
+                                            >
+                                                {transaction.type ===
+                                                    "income"
+                                                    ? "+"
+                                                    : "-"}
+                                                ₹
+                                                {Number(
+                                                    transaction.amount
+                                                ).toLocaleString(
+                                                    "en-IN"
+                                                )}
+                                            </strong>
+
+
+                                            <div className="row-actions">
+
+                                                <button
+                                                    className="icon-button"
+                                                    onClick={() =>
+                                                        openEditModal(
+                                                            transaction
+                                                        )
+                                                    }
+                                                >
+                                                    ✎
+                                                </button>
+
+                                                <button
+                                                    className="icon-button delete"
+                                                    onClick={() =>
+                                                        deleteTransaction(
+                                                            transaction._id
+                                                        )
+                                                    }
+                                                >
+                                                    ×
+                                                </button>
+
+                                            </div>
+
+                                        </div>
+
+                                    )
+                                )
+
+                            )}
+
+                        </div>
+
+                    </div>
+
+                )}
+                {/* REPORTS PAGE */}
+
+                {activePage === "reports" && (
+
+                    <div className="page-section">
+
+                        <div className="page-toolbar">
+
+                            <div>
+
+                                <span className="page-label">
+                                    ANALYTICS
+                                </span>
+
+                                <h2>
+                                    Financial Reports
+                                </h2>
+
+                                <p>
+                                    Understand your spending
+                                    and income patterns.
+                                </p>
+
+                            </div>
+
+                        </div>
+
+
+                        {/* REPORT SUMMARY */}
+
+                        <div className="stats-grid report-stats">
+
+                            <div className="stat-card income-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Total Income
+                                    </span>
+
+                                    <div className="stat-icon income">
+                                        ↗
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    ₹
+                                    {totalIncome.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
+
+                                <small>
+                                    All recorded income
+                                </small>
+
+                            </div>
+
+
+                            <div className="stat-card expense-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Total Expenses
+                                    </span>
+
+                                    <div className="stat-icon expense">
+                                        ↘
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    ₹
+                                    {totalExpense.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
+
+                                <small>
+                                    All recorded expenses
+                                </small>
+
+                            </div>
+
+
+                            <div className="stat-card balance-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Net Balance
+                                    </span>
+
+                                    <div className="stat-icon balance">
+                                        ₹
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    ₹
+                                    {balance.toLocaleString(
+                                        "en-IN"
+                                    )}
+                                </h2>
+
+                                <small>
+                                    Income minus expenses
+                                </small>
+
+                            </div>
+
+
+                            <div className="stat-card savings-card">
+
+                                <div className="stat-card-top">
+
+                                    <span>
+                                        Savings Rate
+                                    </span>
+
+                                    <div className="stat-icon savings">
+                                        %
+                                    </div>
+
+                                </div>
+
+                                <h2>
+                                    {savingsRate}%
+                                </h2>
+
+                                <small>
+                                    Current savings rate
+                                </small>
+
+                            </div>
+
+                        </div>
+
+
+                        {/* MONTHLY CHART */}
+
+                        <div className="analytics-card report-chart-card">
+
+                            <div className="section-header">
+
+                                <div>
+
+                                    <h3>
+                                        Income vs Expense
+                                    </h3>
+
+                                    <p>
+                                        Financial activity
+                                        over recent months
+                                    </p>
+
+                                </div>
+
+                                <span className="period-label">
+                                    Last 6 months
+                                </span>
+
+                            </div>
+
+
+                            <div className="bar-chart">
+
+                                {monthlyData.length === 0 ? (
+
+                                    <div className="empty-chart">
+
+                                        <div className="empty-icon">
+                                            ◔
+                                        </div>
+
+                                        <p>
+                                            No monthly data
+                                            available yet.
+                                        </p>
+
+                                    </div>
+
+                                ) : (
+
+                                    monthlyData.map(
+                                        (
+                                            [month, values]
+                                        ) => {
+
+                                            const maxValue =
+                                                Math.max(
+                                                    values.income,
+                                                    values.expense,
+                                                    1
+                                                );
+
+                                            return (
+
+                                                <div
+                                                    className="chart-column"
+                                                    key={month}
+                                                >
+
+                                                    <div className="bars">
+
+                                                        <div
+                                                            className="bar income"
+                                                            style={{
+                                                                height:
+                                                                    `${Math.max(
+                                                                        (
+                                                                            values.income /
+                                                                            maxValue
+                                                                        ) *
+                                                                        100,
+                                                                        5
+                                                                    )}%`
+                                                            }}
+                                                        />
+
+                                                        <div
+                                                            className="bar expense"
+                                                            style={{
+                                                                height:
+                                                                    `${Math.max(
+                                                                        (
+                                                                            values.expense /
+                                                                            maxValue
+                                                                        ) *
+                                                                        100,
+                                                                        5
+                                                                    )}%`
+                                                            }}
+                                                        />
+
+                                                    </div>
+
+                                                    <span>
+                                                        {month}
+                                                    </span>
+
+                                                </div>
+
+                                            );
+
+                                        }
+                                    )
+
+                                )}
+
+                            </div>
+
+
+                            <div className="chart-legend">
+
+                                <span>
+                                    <i className="legend-dot income-dot" />
+                                    Income
+                                </span>
+
+                                <span>
+                                    <i className="legend-dot expense-dot" />
+                                    Expenses
+                                </span>
+
+                            </div>
+
+                        </div>
+
+
+                        {/* CATEGORY REPORT */}
+
+                        <div className="analytics-card">
+
+                            <div className="section-header">
+
+                                <div>
+
+                                    <h3>
+                                        Spending by Category
+                                    </h3>
+
+                                    <p>
+                                        Detailed expense
+                                        distribution
+                                    </p>
+
+                                </div>
+
+                            </div>
+
+
+                            {categoryData.length === 0 ? (
+
+                                <div className="empty-chart">
+
+                                    <div className="empty-icon">
+                                        ₹
+                                    </div>
+
+                                    <p>
+                                        Add expenses to see
+                                        category analytics.
+                                    </p>
+
+                                </div>
+
+                            ) : (
+
+                                <div className="category-report-grid">
+
+                                    {categoryData.map(
+                                        (
+                                            [category, amount],
+                                            index
+                                        ) => {
+
+                                            const percentage =
+                                                totalExpense > 0
+                                                    ? (
+                                                        amount /
+                                                        totalExpense
+                                                    ) *
+                                                    100
+                                                    : 0;
+
+                                            return (
+
+                                                <div
+                                                    className="report-category-card"
+                                                    key={
+                                                        category
+                                                    }
+                                                >
+
+                                                    <div className="report-category-top">
+
+                                                        <div
+                                                            className={`category-dot dot-${index}`}
+                                                        />
+
+                                                        <strong>
+                                                            {
+                                                                category
+                                                            }
+                                                        </strong>
+
+                                                        <span>
+                                                            {Math.round(
+                                                                percentage
+                                                            )}
+                                                            %
+                                                        </span>
+
+                                                    </div>
+
+
+                                                    <h3>
+                                                        ₹
+                                                        {amount.toLocaleString(
+                                                            "en-IN"
+                                                        )}
+                                                    </h3>
+
+
+                                                    <div className="category-track">
+
+                                                        <div
+                                                            className="category-fill"
+                                                            style={{
+                                                                width:
+                                                                    `${percentage}%`
+                                                            }}
+                                                        />
+
+                                                    </div>
+
+                                                </div>
+
+                                            );
+
+                                        }
+                                    )}
+
+                                </div>
+
+                            )}
+
+                        </div>
+
+                    </div>
+
+                )}
+
+
+                {/* SETTINGS PAGE */}
+
+                {activePage === "settings" && (
+
+                    <div className="page-section">
+
+                        <div className="page-toolbar">
+
+                            <div>
+
+                                <span className="page-label">
+                                    PREFERENCES
+                                </span>
+
+                                <h2>
+                                    Settings
+                                </h2>
+
+                                <p>
+                                    Manage your account and
+                                    application preferences.
+                                </p>
+
+                            </div>
+
+                        </div>
+
+
+                        <div className="settings-grid">
+
+                            {/* PROFILE */}
+
+                            <div className="settings-card">
+
+                                <div className="settings-card-header">
+
+                                    <div className="settings-icon">
+                                        👤
+                                    </div>
+
+                                    <div>
+
+                                        <h3>
+                                            Profile
+                                        </h3>
+
+                                        <p>
+                                            Your account
+                                            information
+                                        </p>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div className="profile-preview">
+
+                                    <div className="large-avatar">
+
+                                        {user.name
+                                            ?.charAt(0)
+                                            ?.toUpperCase()}
+
+                                    </div>
+
+
+                                    <div>
+
+                                        <strong>
+                                            {user.name}
+                                        </strong>
+
+                                        <span>
+                                            {user.email}
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                            </div>
+
+
+                            {/* APPEARANCE */}
+
+                            <div className="settings-card">
+
+                                <div className="settings-card-header">
+
+                                    <div className="settings-icon">
+                                        ◐
+                                    </div>
+
+                                    <div>
+
+                                        <h3>
+                                            Appearance
+                                        </h3>
+
+                                        <p>
+                                            Customize your
+                                            dashboard
+                                        </p>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div className="setting-row">
+
+                                    <div>
+
+                                        <strong>
+                                            Dark Mode
+                                        </strong>
+
+                                        <span>
+                                            Use a darker
+                                            interface
+                                        </span>
+
+                                    </div>
+
+
+                                    <button
+                                        className={
+                                            darkMode
+                                                ? "toggle active"
+                                                : "toggle"
+                                        }
+                                        onClick={() =>
+                                            setDarkMode(
+                                                (prev) =>
+                                                    !prev
+                                            )
+                                        }
+                                    >
+
+                                        <span />
+
                                     </button>
 
                                 </div>
 
                             </div>
 
-                        </>
-                    )}
 
-                </section>
+                            {/* BUDGET SETTINGS */}
+
+                            <div className="settings-card">
+
+                                <div className="settings-card-header">
+
+                                    <div className="settings-icon">
+                                        🎯
+                                    </div>
+
+                                    <div>
+
+                                        <h3>
+                                            Monthly Budget
+                                        </h3>
+
+                                        <p>
+                                            Set your spending
+                                            limit
+                                        </p>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div className="budget-setting">
+
+                                    <label>
+                                        Monthly Budget
+                                    </label>
+
+                                    <div className="budget-input">
+
+                                        <span>
+                                            ₹
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            value={budget}
+                                            onChange={(e) =>
+                                                setBudget(
+                                                    Number(
+                                                        e.target
+                                                            .value
+                                                    )
+                                                )
+                                            }
+                                            onBlur={() =>
+                                                localStorage.setItem(
+                                                    "expense_budget",
+                                                    budget
+                                                )
+                                            }
+                                        />
+
+                                    </div>
+
+                                    <button
+                                        className="primary-button"
+                                        onClick={() =>
+                                            updateBudget(
+                                                budget
+                                            )
+                                        }
+                                    >
+                                        Save Budget
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+
+                            {/* ACCOUNT */}
+
+                            <div className="settings-card danger-card">
+
+                                <div className="settings-card-header">
+
+                                    <div className="settings-icon">
+                                        ⚠
+                                    </div>
+
+                                    <div>
+
+                                        <h3>
+                                            Account
+                                        </h3>
+
+                                        <p>
+                                            Manage your
+                                            session
+                                        </p>
+
+                                    </div>
+
+                                </div>
+
+
+                                <button
+                                    className="logout-large"
+                                    onClick={logout}
+                                >
+                                    Logout from Account
+                                </button>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                )}
+
 
             </main>
 
 
-            {/* MODAL */}
+            {/* TRANSACTION MODAL */}
 
             {showModal && (
+
                 <TransactionModal
                     transaction={
                         editingTransaction
@@ -1755,193 +2862,35 @@ function App() {
                         );
                     }}
                     onSave={
-                        saveTransaction
+                        editingTransaction
+                            ? (data) =>
+                                updateTransaction(
+                                    editingTransaction._id,
+                                    data
+                                )
+                            : addTransaction
                     }
                 />
+
             )}
 
 
             {/* TOAST */}
 
             {toast && (
+
                 <div className="toast">
-                    ✓ {toast}
-                </div>
-            )}
 
-        </div>
-    );
-}
+                    <span className="toast-icon">
+                        ✓
+                    </span>
 
+                    <span>
+                        {toast}
+                    </span>
 
-// =====================================================
-// STAT CARD
-// =====================================================
-
-function StatCard({
-    icon,
-    title,
-    value,
-    note,
-    type,
-    raw
-}) {
-
-    return (
-        <div className="stat-card">
-
-            <div className={`stat-icon ${type}`}>
-                {icon}
-            </div>
-
-            <span className="stat-title">
-                {title}
-            </span>
-
-            <strong className="stat-value">
-                {raw
-                    ? value
-                    : `₹${Number(
-                        value
-                    ).toLocaleString()}`}
-            </strong>
-
-            <small className={type}>
-                {type === "expense"
-                    ? "↓ "
-                    : type === "income"
-                        ? "↑ "
-                        : ""}
-                {note}
-            </small>
-
-        </div>
-    );
-}
-
-
-// =====================================================
-// TRANSACTION LIST
-// =====================================================
-
-function TransactionList({
-    transactions,
-    onEdit,
-    onDelete
-}) {
-
-    if (!transactions.length) {
-
-        return (
-            <div className="empty-state">
-
-                <div className="empty-icon">
-                    ₹
                 </div>
 
-                <h3>
-                    No transactions yet
-                </h3>
-
-                <p>
-                    Add your first income or
-                    expense to get started.
-                </p>
-
-            </div>
-        );
-    }
-
-
-    return (
-        <div className="transaction-list">
-
-            {transactions.map(
-                (transaction) => (
-
-                    <div
-                        className="transaction-row"
-                        key={
-                            transaction._id
-                        }
-                    >
-
-                        <div className="transaction-icon">
-                            {transaction.type ===
-                                "income"
-                                ? "↗"
-                                : "↘"}
-                        </div>
-
-
-                        <div className="transaction-main">
-
-                            <strong>
-                                {
-                                    transaction.title
-                                }
-                            </strong>
-
-                            <span>
-                                {
-                                    transaction.category
-                                }
-                                {" • "}
-                                {new Date(
-                                    transaction.date
-                                ).toLocaleDateString(
-                                    "en-IN"
-                                )}
-                            </span>
-
-                        </div>
-
-
-                        <strong
-                            className={
-                                transaction.type ===
-                                    "income"
-                                    ? "amount positive"
-                                    : "amount negative"
-                            }
-                        >
-                            {transaction.type ===
-                                "income"
-                                ? "+"
-                                : "-"}
-                            ₹
-                            {Number(
-                                transaction.amount
-                            ).toLocaleString()}
-                        </strong>
-
-
-                        <div className="row-actions">
-
-                            <button
-                                onClick={() =>
-                                    onEdit(
-                                        transaction
-                                    )
-                                }
-                            >
-                                ✎
-                            </button>
-
-                            <button
-                                onClick={() =>
-                                    onDelete(
-                                        transaction._id
-                                    )
-                                }
-                            >
-                                🗑
-                            </button>
-
-                        </div>
-
-                    </div>
-                )
             )}
 
         </div>
@@ -1998,20 +2947,22 @@ function TransactionModal({
         e.preventDefault();
 
         if (
-            !title ||
+            !title.trim() ||
             !amount ||
             Number(amount) <= 0
         ) {
+
             alert(
-                "Please enter valid transaction details"
+                "Please enter valid transaction details."
             );
 
             return;
         }
 
+
         onSave({
-            title,
-            amount,
+            title: title.trim(),
+            amount: Number(amount),
             type,
             category,
             date
@@ -2020,6 +2971,7 @@ function TransactionModal({
 
 
     return (
+
         <div
             className="modal-overlay"
             onMouseDown={(e) => {
@@ -2039,6 +2991,7 @@ function TransactionModal({
                 <div className="modal-header">
 
                     <div>
+
                         <span>
                             MONEY MANAGEMENT
                         </span>
@@ -2048,7 +3001,9 @@ function TransactionModal({
                                 ? "Edit Transaction"
                                 : "Add Transaction"}
                         </h2>
+
                     </div>
+
 
                     <button
                         className="close-button"
@@ -2083,6 +3038,7 @@ function TransactionModal({
                             ↓ Expense
                         </button>
 
+
                         <button
                             type="button"
                             className={
@@ -2105,37 +3061,44 @@ function TransactionModal({
                     <div className="form-grid">
 
                         <div className="input-group">
+
                             <label>
                                 Title
                             </label>
 
                             <input
+                                type="text"
+                                placeholder="e.g. Grocery shopping"
                                 value={title}
                                 onChange={(e) =>
                                     setTitle(
                                         e.target.value
                                     )
                                 }
-                                placeholder="e.g. Grocery shopping"
                             />
+
                         </div>
 
 
                         <div className="input-group">
+
                             <label>
                                 Amount
                             </label>
 
                             <input
                                 type="number"
+                                placeholder="0"
+                                min="0"
+                                step="0.01"
                                 value={amount}
                                 onChange={(e) =>
                                     setAmount(
                                         e.target.value
                                     )
                                 }
-                                placeholder="₹ 0"
                             />
+
                         </div>
 
 
@@ -2156,12 +3119,14 @@ function TransactionModal({
 
                                 {categories.map(
                                     (item) => (
+
                                         <option
                                             key={item}
                                             value={item}
                                         >
                                             {item}
                                         </option>
+
                                     )
                                 )}
 
@@ -2201,6 +3166,7 @@ function TransactionModal({
                             Cancel
                         </button>
 
+
                         <button
                             type="submit"
                             className="primary-button"
@@ -2217,8 +3183,11 @@ function TransactionModal({
             </div>
 
         </div>
+
     );
 }
-
+// =====================================================
+// EXPORT APP
+// =====================================================
 
 export default App;
