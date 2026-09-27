@@ -330,8 +330,7 @@ function App() {
     // AUTH TOKEN
     // =================================================
 
-    const token =
-        localStorage.getItem("expense_token");
+    
 
 
     // =================================================
